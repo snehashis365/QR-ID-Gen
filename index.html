@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ID Card Editor</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f9f9f9;
+    }
+    h1 {
+      text-align: center;
+    }
+    .editor {
+      max-width: 800px;
+      margin: auto;
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.1);
+    }
+    canvas {
+      border: 1px solid #ccc;
+      width: 100%;
+      height: auto;
+    }
+    label {
+      display: block;
+      margin: 10px 0 5px;
+    }
+    input[type="number"], input[type="file"], select, input[type="text"] {
+      width: 100%;
+      padding: 6px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+    }
+    .row > div {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="editor">
+    <h1>ID Card Editor</h1>
+
+    <label>Upload Base Image (JPG/PNG)</label>
+    <input type="file" id="baseImgInput" accept="image/*" />
+
+    <div class="row">
+      <div>
+        <label>Name Y Position</label>
+        <input type="number" id="nameY" value="2000" />
+      </div>
+      <div>
+        <label>Vehicle Y Position</label>
+        <input type="number" id="vehY" value="2100" />
+      </div>
+      <div>
+        <label>QR Y Position</label>
+        <input type="number" id="qrY" value="2200" />
+      </div>
+    </div>
+
+    <label>South Eastern Railway (Optional)</label>
+    <input type="text" id="serLine" placeholder="Leave empty if not needed" />
+
+    <label>Upload Excel File</label>
+    <input type="file" id="excelInput" accept=".xlsx" />
+
+    <label>Output Format</label>
+    <select id="outType">
+      <option value="png">PNG</option>
+      <option value="jpg">JPG</option>
+    </select>
+
+    <button id="generateBtn">Generate ID Cards</button>
+    <button id="downloadOne">Download Preview</button>
+
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script>
+    const baseImgInput = document.getElementById("baseImgInput");
+    const excelInput = document.getElementById("excelInput");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let baseImg = new Image();
+    let nameY, vehY, qrY;
+
+    // Generate QR with lower error correction and trimmed data to avoid overflow
+    function generateQRCodeCanvas(text) {
+      const tempDiv = document.createElement("div");
+      const qr = new QRCode(tempDiv, {
+        text: text,
+        width: 700,
+        height: 700,
+        correctLevel: QRCode.CorrectLevel.M // medium error correction to allow bigger data
+      });
+      const qrImg = tempDiv.querySelector("img");
+      const qrCanvas = document.createElement("canvas");
+      const qrCtx = qrCanvas.getContext("2d");
+      qrCanvas.width = qrCanvas.height = 700;
+      return new Promise(res => {
+        qrImg.onload = () => {
+          qrCtx.fillStyle = "white";
+          qrCtx.fillRect(0, 0, 700, 700);
+          qrCtx.drawImage(qrImg, 0, 0, 700, 700);
+          res(qrCanvas);
+        };
+      });
+    }
+
+    async function drawCard(data, cb, type = "png") {
+      const { name, vehicle, qrText } = data;
+      canvas.width = baseImg.width;
+      canvas.height = baseImg.height;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(baseImg, 0, 0);
+      ctx.font = "72px Arial";
+      ctx.fillStyle = "black";
+      ctx.textAlign = "center";
+      ctx.fillText(name.toUpperCase(), canvas.width / 2, nameY);
+      ctx.fillText(vehicle.toUpperCase(), canvas.width / 2, vehY);
+
+      const qrCanvas = await generateQRCodeCanvas(qrText);
+      const padding = 20;
+      const x = (canvas.width - qrCanvas.width) / 2;
+      ctx.drawImage(qrCanvas, x, qrY + padding);
+      cb(canvas.toDataURL(`image/${type}`));
+    }
+
+    function generateBatch() {
+      if (!baseImg.src) return alert("Upload base image first.");
+      const file = excelInput.files[0];
+      if (!file) return alert("Upload Excel file.");
+
+      nameY = +document.getElementById("nameY").value;
+      vehY = +document.getElementById("vehY").value;
+      qrY = +document.getElementById("qrY").value;
+      const outType = document.getElementById("outType").value;
+      const serLine = document.getElementById("serLine").value.trim();
+
+      const reader = new FileReader();
+      reader.onload = e => {
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+        const zip = new JSZip();
+        let done = 0;
+
+        rows.forEach((row, i) => {
+          const name = (row["NAME"] || "").toString().trim();
+          const vehicle = (row["VEHICHE NO."] || "").toString().trim();
+          const empId = (row["EMPLOYEE ID"] || `emp_${i + 1}`).toString().trim();
+          const office = (row["OFFICE"] || "").toString().trim();
+          const dept = (row["DEPARTMENT"] || "").toString().trim();
+          const lic = (row["DRIVING LICENCE NO."] || "").toString().trim();
+          const mobile = (row["CONTACT NUMBER"] || "").toString().trim();
+          const bg = (row["BLOOD GROUP"] || "").toString().trim();
+          const cu = `${office}, ${dept}`.trim();
+
+          // Shortened QR text to avoid overflow errors
+          const qrText = [
+            serLine ? `${serLine.toUpperCase()}` : null,
+            `Nm: ${name}`,
+            `CU: ${cu}`,
+            `Emp#: ${empId}`,
+            `Veh#: ${vehicle}`,
+            `DL#: ${lic}`,
+            `Mob: ${mobile}`,
+            `BG: ${bg}`
+          ].filter(Boolean).join("\n");
+
+          console.log(`\n[${empId}] QR TEXT:\n` + qrText);
+
+          drawCard({ name, vehicle, qrText }, imgData => {
+            zip.file(`${empId}.${outType}`, imgData.split(",")[1], { base64: true });
+            if (++done === rows.length) {
+              zip.generateAsync({ type: "blob" }).then(content => {
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(content);
+                a.download = "id_cards.zip";
+                a.click();
+              });
+            }
+          }, outType);
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function downloadSinglePreview() {
+      const outType = document.getElementById("outType").value;
+      const link = document.createElement("a");
+      link.download = `preview.${outType}`;
+      link.href = canvas.toDataURL(`image/${outType}`);
+      link.click();
+    }
+
+    document.getElementById('generateBtn').addEventListener('click', generateBatch);
+    document.getElementById('downloadOne').addEventListener('click', downloadSinglePreview);
+
+    baseImgInput.addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => { baseImg.onload = () => drawAll(); baseImg.src = reader.result; };
+      reader.readAsDataURL(file);
+    });
+
+    function drawAll() {
+      if (!baseImg.src) return;
+      nameY = +document.getElementById("nameY").value;
+      vehY = +document.getElementById("vehY").value;
+      qrY = +document.getElementById("qrY").value;
+      drawCard({ name: "JOHN DOE", vehicle: "WB12AB1234", qrText: "Sample QR" }, () => {});
+    }
+
+    document.querySelectorAll("input[type='number']").forEach(i => i.addEventListener("input", drawAll));
+  </script>
+</body>
+</html>
