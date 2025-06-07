@@ -65,8 +65,8 @@
       </div>
     </div>
 
-    <label>South Eastern Railway (Optional)</label>
-    <input type="text" id="serLine" placeholder="Leave empty if not needed" />
+    <label>HEADER (Mandatory)</label>
+    <input type="text" id="serLine" placeholder="Enter header text" required />
 
     <label>Upload Excel File</label>
     <input type="file" id="excelInput" accept=".xlsx" />
@@ -94,14 +94,13 @@
     let baseImg = new Image();
     let nameY, vehY, qrY;
 
-    // Generate QR with lower error correction and trimmed data to avoid overflow
     function generateQRCodeCanvas(text) {
       const tempDiv = document.createElement("div");
       const qr = new QRCode(tempDiv, {
         text: text,
         width: 700,
         height: 700,
-        correctLevel: QRCode.CorrectLevel.M // medium error correction to allow bigger data
+        correctLevel: QRCode.CorrectLevel.L
       });
       const qrImg = tempDiv.querySelector("img");
       const qrCanvas = document.createElement("canvas");
@@ -147,6 +146,11 @@
       const outType = document.getElementById("outType").value;
       const serLine = document.getElementById("serLine").value.trim();
 
+      if (!serLine) {
+        alert("HEADER is mandatory. Please enter it.");
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = e => {
         const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
@@ -165,16 +169,15 @@
           const bg = (row["BLOOD GROUP"] || "").toString().trim();
           const cu = `${office}, ${dept}`.trim();
 
-          // Shortened QR text to avoid overflow errors
           const qrText = [
-            serLine ? `${serLine.toUpperCase()}` : null,
-            `Nm: ${name}`,
-            `CU: ${cu}`,
-            `Emp#: ${empId}`,
-            `Veh#: ${vehicle}`,
-            `DL#: ${lic}`,
-            `Mob: ${mobile}`,
-            `BG: ${bg}`
+            serLine.toUpperCase(),
+            `NAME: ${name}`,
+            `CONYROLLING UNIT: ${cu}`,
+            `EMPLOYEE ID: ${empId}`,
+            `VEHICHE NO.: ${vehicle}`,
+            `DRIVING LICENCE NO.: ${lic}`,
+            `PHONE: ${mobile}`,
+            `Blood Group: ${bg}`
           ].filter(Boolean).join("\n");
 
           console.log(`\n[${empId}] QR TEXT:\n` + qrText);
